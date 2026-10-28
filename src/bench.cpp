@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
         ++i;
       } else {
         std::vector<corekv::Mutation> batch;
-        const auto size = std::min(batch_size, count - i);
+        const auto size = std::min<std::uint64_t>(batch_size, count - i);
         batch.reserve(static_cast<std::size_t>(size));
         for (std::uint64_t j = 0; j < size; ++j)
           batch.push_back({"key-" + std::to_string(i + j), value});
