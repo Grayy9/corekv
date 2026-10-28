@@ -1,0 +1,4 @@
+build/
+*.exe
+__pycache__/
+*.db/
