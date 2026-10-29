@@ -24,6 +24,7 @@ struct Stats {
   std::size_t sst_files = 0;
   std::size_t memtable_entries = 0;
   std::size_t compactions = 0;  // since this DB object was opened
+  std::size_t memtable_bytes = 0;  // key bytes + value bytes + one marker per entry
 };
 
 class DB {

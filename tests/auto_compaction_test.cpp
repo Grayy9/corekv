@@ -64,8 +64,20 @@ int main() {
       db->Put("pending", "value");
       check(db->GetStats().memtable_entries == 1 && db->GetStats().sst_files == 0,
             "pending write appears in stats");
+      check(db->GetStats().memtable_bytes == 13, "memtable bytes after insert");
+      db->Put("pending", "v");
+      check(db->GetStats().memtable_bytes == 9, "memtable bytes after overwrite");
+      db->Delete("pending");
+      check(db->GetStats().memtable_bytes == 8, "memtable bytes after delete");
+      db->WriteBatch({{"pending", "longer"}, {"pending", "x"}});
+      check(db->GetStats().memtable_bytes == 9, "memtable bytes after repeated batch key");
+    }
+    {
+      auto db = corekv::DB::Open(path / "metrics");
+      check(db->GetStats().memtable_bytes == 9, "memtable bytes after WAL replay");
       db->Flush();
-      check(db->GetStats().memtable_entries == 0 && db->GetStats().sst_files == 1,
+      check(db->GetStats().memtable_entries == 0 && db->GetStats().memtable_bytes == 0 &&
+            db->GetStats().sst_files == 1,
             "flush updates stats");
     }
     bool rejected = false;

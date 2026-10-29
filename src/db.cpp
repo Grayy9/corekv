@@ -72,9 +72,13 @@ std::optional<std::uint64_t> parse_sst_name(const std::string& name) {
   return std::stoull(name.substr(4, 20));
 }
 
+std::size_t entry_size(const std::string& key, const std::optional<std::string>& value) {
+  return key.size() + (value ? value->size() : 0) + 1;
+}
+
 std::size_t memtable_size(const std::map<std::string, std::optional<std::string>>& entries) {
   std::size_t size = 0;
-  for (const auto& [key, value] : entries) size += key.size() + (value ? value->size() : 0) + 1;
+  for (const auto& [key, value] : entries) size += entry_size(key, value);
   return size;
 }
 }  // namespace
@@ -89,6 +93,7 @@ struct DB::Impl {
   std::unique_ptr<detail::Wal> wal;
   std::uint64_t next_id = 1;
   std::size_t compactions = 0;
+  std::size_t memtable_bytes = 0;
   bool write_failed = false;
 
   Impl(std::filesystem::path path, Options config)
@@ -107,6 +112,15 @@ struct DB::Impl {
     if (!ssts.empty()) next_id = ssts.back().id() + 1;
     wal = std::make_unique<detail::Wal>(directory / "WAL");
     wal->Replay(memtable);
+    memtable_bytes = memtable_size(memtable);
+  }
+
+  void set_memtable(const std::string& key, std::optional<std::string> value) {
+    const auto existing = memtable.find(key);
+    const auto previous = existing == memtable.end() ? 0 : entry_size(existing->first, existing->second);
+    const auto current = entry_size(key, value);
+    memtable[key] = std::move(value);
+    memtable_bytes = memtable_bytes - previous + current;
   }
 
   void compact_files() {
@@ -131,6 +145,7 @@ struct DB::Impl {
     ++next_id;
     ssts.push_back(std::move(file));
     memtable.clear();
+    memtable_bytes = 0;
     wal->Reset();
     if (options.compaction_trigger != 0 && ssts.size() >= options.compaction_trigger)
       compact_files();
@@ -141,8 +156,8 @@ struct DB::Impl {
     if (write_failed) throw std::runtime_error("database write path failed; reopen required");
     try {
       wal->Append({key, value});
-      memtable[key] = std::move(value);
-      if (memtable_size(memtable) >= options.memtable_limit) flush();
+      set_memtable(key, std::move(value));
+      if (memtable_bytes >= options.memtable_limit) flush();
     } catch (...) {
       write_failed = true;
       throw;
@@ -154,8 +169,8 @@ struct DB::Impl {
     if (write_failed) throw std::runtime_error("database write path failed; reopen required");
     try {
       wal->AppendBatch(entries);
-      for (const auto& entry : entries) memtable[entry.key] = entry.value;
-      if (memtable_size(memtable) >= options.memtable_limit) flush();
+      for (const auto& entry : entries) set_memtable(entry.key, entry.value);
+      if (memtable_bytes >= options.memtable_limit) flush();
     } catch (...) {
       write_failed = true;
       throw;
@@ -274,7 +289,8 @@ void DB::Compact() {
 
 Stats DB::GetStats() {
   std::lock_guard guard(impl_->mutex);
-  return {impl_->ssts.size(), impl_->memtable.size(), impl_->compactions};
+  return {impl_->ssts.size(), impl_->memtable.size(), impl_->compactions,
+          impl_->memtable_bytes};
 }
 
 }  // namespace corekv
