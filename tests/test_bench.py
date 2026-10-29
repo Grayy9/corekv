@@ -27,6 +27,18 @@ class BenchTests(unittest.TestCase):
             self.assertEqual(report["batch_size"], 4)
             self.assertGreater(report["write_ops_per_second"], 0)
 
+    def test_reports_compaction_tail_latency(self):
+        executable = os.environ.get("COREKV_COMPACTION_BENCH", "./corekv_compaction_bench")
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run([executable, directory, "6", "1", "3"],
+                                    capture_output=True, text=True, timeout=10, check=True)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["writes_completed"], 6)
+            self.assertEqual(report["compactions"], 2)
+            self.assertEqual(report["sst_files"], 2)
+            self.assertGreaterEqual(report["write_max_ms"], report["write_p99_ms"])
+            self.assertGreaterEqual(report["write_p99_ms"], report["write_p50_ms"])
+
 
 if __name__ == "__main__":
     unittest.main()
