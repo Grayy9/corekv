@@ -20,6 +20,12 @@ struct Mutation {
   std::optional<std::string> value;  // nullopt means Delete
 };
 
+struct Stats {
+  std::size_t sst_files = 0;
+  std::size_t memtable_entries = 0;
+  std::size_t compactions = 0;  // since this DB object was opened
+};
+
 class DB {
  public:
   static std::unique_ptr<DB> Open(const std::filesystem::path& directory, Options options = {});
@@ -35,6 +41,7 @@ class DB {
   void WriteBatch(const std::vector<Mutation>& mutations);
   void Flush();
   void Compact();
+  Stats GetStats();
 
  private:
   struct Impl;

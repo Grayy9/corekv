@@ -27,8 +27,12 @@ int main() {
       db->Put("a", "old");
       db->Put("b", "two");
       check(sst_count(path) == 2, "below threshold keeps SSTs");
+      check(db->GetStats().sst_files == 2 && db->GetStats().compactions == 0,
+            "stats before threshold");
       db->Delete("a");
       check(sst_count(path) == 1, "threshold compacts SSTs");
+      check(db->GetStats().sst_files == 1 && db->GetStats().compactions == 1,
+            "stats after automatic compaction");
       check(!db->Get("a") && db->Get("b") == "two", "latest states visible");
     }
     {
@@ -37,6 +41,7 @@ int main() {
       db->Put("a", "new");
       db->Put("c", "three");
       check(sst_count(path) == 1, "later writes trigger another compaction");
+      check(db->GetStats().compactions == 1, "compaction count starts at open");
       check(db->Get("a") == "new", "new value survives tombstone");
     }
     {
@@ -48,6 +53,20 @@ int main() {
       auto db = corekv::DB::Open(disabled, {.memtable_limit = 1, .compaction_trigger = 0});
       for (int i = 0; i < 4; ++i) db->Put("key-" + std::to_string(i), "v");
       check(sst_count(disabled) == 4, "zero disables automatic compaction");
+      check(db->GetStats().sst_files == 4 && db->GetStats().compactions == 0,
+            "disabled compaction stats");
+      db->Compact();
+      check(db->GetStats().sst_files == 1 && db->GetStats().compactions == 1,
+            "manual compaction updates stats");
+    }
+    {
+      auto db = corekv::DB::Open(path / "metrics");
+      db->Put("pending", "value");
+      check(db->GetStats().memtable_entries == 1 && db->GetStats().sst_files == 0,
+            "pending write appears in stats");
+      db->Flush();
+      check(db->GetStats().memtable_entries == 0 && db->GetStats().sst_files == 1,
+            "flush updates stats");
     }
     bool rejected = false;
     try { auto db = corekv::DB::Open(path / "invalid", {.compaction_trigger = 1}); }

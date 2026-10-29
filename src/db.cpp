@@ -88,6 +88,7 @@ struct DB::Impl {
   std::vector<detail::SstFile> ssts;
   std::unique_ptr<detail::Wal> wal;
   std::uint64_t next_id = 1;
+  std::size_t compactions = 0;
   bool write_failed = false;
 
   Impl(std::filesystem::path path, Options config)
@@ -121,6 +122,7 @@ struct DB::Impl {
     ssts.clear();
     for (const auto& old : old_paths) std::filesystem::remove(old);
     ssts.push_back(std::move(compacted));
+    ++compactions;
   }
 
   void flush() {
@@ -268,6 +270,11 @@ void DB::Compact() {
     impl_->write_failed = true;
     throw;
   }
+}
+
+Stats DB::GetStats() {
+  std::lock_guard guard(impl_->mutex);
+  return {impl_->ssts.size(), impl_->memtable.size(), impl_->compactions};
 }
 
 }  // namespace corekv
