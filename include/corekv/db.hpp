@@ -12,6 +12,7 @@ namespace corekv {
 
 struct Options {
   std::size_t memtable_limit = 1024 * 1024;
+  std::size_t compaction_trigger = 4;  // 0 disables automatic compaction
 };
 
 struct Mutation {

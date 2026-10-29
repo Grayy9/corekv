@@ -93,6 +93,8 @@ struct DB::Impl {
   Impl(std::filesystem::path path, Options config)
       : directory(std::move(path)), options(config), lock(directory / "LOCK") {
     if (options.memtable_limit == 0) throw std::invalid_argument("memtable limit must be positive");
+    if (options.compaction_trigger == 1)
+      throw std::invalid_argument("compaction trigger must be zero or at least two");
     for (const auto& file : std::filesystem::directory_iterator(directory)) {
       if (!file.is_regular_file()) continue;
       const auto id = parse_sst_name(file.path().filename().string());
@@ -106,6 +108,21 @@ struct DB::Impl {
     wal->Replay(memtable);
   }
 
+  void compact_files() {
+    if (ssts.size() <= 1) return;
+    std::map<std::string, std::optional<std::string>> merged;
+    for (const auto& sst : ssts)
+      for (auto& entry : sst.All()) merged[std::move(entry.key)] = std::move(entry.value);
+    auto compacted = detail::SstFile::Write(directory / sst_name(next_id), next_id, merged);
+    ++next_id;
+    std::vector<std::filesystem::path> old_paths;
+    old_paths.reserve(ssts.size());
+    for (const auto& old : ssts) old_paths.push_back(old.path());
+    ssts.clear();
+    for (const auto& old : old_paths) std::filesystem::remove(old);
+    ssts.push_back(std::move(compacted));
+  }
+
   void flush() {
     if (memtable.empty()) return;
     auto file = detail::SstFile::Write(directory / sst_name(next_id), next_id, memtable);
@@ -113,6 +130,8 @@ struct DB::Impl {
     ssts.push_back(std::move(file));
     memtable.clear();
     wal->Reset();
+    if (options.compaction_trigger != 0 && ssts.size() >= options.compaction_trigger)
+      compact_files();
   }
 
   void write(const std::string& key, std::optional<std::string> value) {
@@ -244,19 +263,7 @@ void DB::Compact() {
   if (impl_->write_failed) throw std::runtime_error("database write path failed; reopen required");
   try {
     impl_->flush();
-    if (impl_->ssts.size() <= 1) return;
-    std::map<std::string, std::optional<std::string>> merged;
-    for (const auto& sst : impl_->ssts)
-      for (auto& entry : sst.All()) merged[std::move(entry.key)] = std::move(entry.value);
-    auto compacted = detail::SstFile::Write(
-        impl_->directory / sst_name(impl_->next_id), impl_->next_id, merged);
-    ++impl_->next_id;
-    std::vector<std::filesystem::path> old_paths;
-    old_paths.reserve(impl_->ssts.size());
-    for (const auto& old : impl_->ssts) old_paths.push_back(old.path());
-    impl_->ssts.clear();
-    for (const auto& old : old_paths) std::filesystem::remove(old);
-    impl_->ssts.push_back(std::move(compacted));
+    impl_->compact_files();
   } catch (...) {
     impl_->write_failed = true;
     throw;
